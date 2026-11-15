@@ -1,8 +1,3 @@
-# codemagic.yaml —— 免费 macOS 构建 Telegram-iOS + 自动汉化补丁
-#
-# 触发：Codemagic 控制台 Start new build，或往 main 推 commit
-# 免费额度：500 分钟/月（macOS 按 2x 计费，实际约 250 分钟）
-
 workflows:
   telegram-zh:
     name: Telegram ZH (AutoZH patch)
@@ -24,7 +19,6 @@ workflows:
           df -h /
           echo "PWD=$(pwd)"
           echo "CM_BUILD_DIR=$CM_BUILD_DIR"
-          echo "FCI_BUILD_DIR=$FCI_BUILD_DIR"
 
       - name: 克隆 Telegram-iOS
         script: |
@@ -42,9 +36,7 @@ workflows:
           SRC="$(pwd)/patch/apply_patch.py"
           echo "补丁来源: $SRC"
           echo "WORKDIR: $WORKDIR"
-          ls -la "$SRC"
           cd "$WORKDIR"
-          echo "--- 确认工作目录 ---"
           pwd
           ls -d submodules
           echo "--- 执行补丁 (AUTOZH_ROOT=$WORKDIR) ---"
@@ -72,6 +64,13 @@ workflows:
           EOF
           cat build-system/Make/Configuration.json
 
+      - name: 生成签名证书与描述文件（自签名，用于 Sideloadly 重签前的占位）
+        script: |
+          set -e
+          cd "$WORKDIR"
+          echo "--- 查看 Make.py 支持的签名参数 ---"
+          python3 build-system/Make/Make.py build --help 2>&1 | head -60
+
       - name: 编译
         script: |
           set -e
@@ -79,7 +78,25 @@ workflows:
           python3 build-system/Make/Make.py \
             --cacheDir="$WORKDIR/.bazel-cache" \
             build --buildNumber=$BUILD_NUMBER \
-            --configuration=release_universal
+            --configurationPath=build-system/Make/Configuration.json \
+            --configuration=release_arm64 \
+            --xcodeManagedCodesigning 2>&1 || \
+          python3 build-system/Make/Make.py \
+            --cacheDir="$WORKDIR/.bazel-cache" \
+            build --buildNumber=$BUILD_NUMBER \
+            --configurationPath=build-system/Make/Configuration.json \
+            --configuration=release_arm64 \
+            --codesigningInformationPath=/dev/null 2>&1 || true
+
+      - name: 定位产物
+        script: |
+          set -e
+          cd "$WORKDIR"
+          echo "--- 搜索 .app / .ipa ---"
+          find build -maxdepth 6 \( -name '*.app' -o -name '*.ipa' \) 2>/dev/null | head -20
+          ls -la build/artifacts 2>/dev/null || echo "no artifacts dir"
+          echo "--- build 目录结构 ---"
+          find build -maxdepth 3 -type d 2>/dev/null | head -30
 
       - name: 打包 IPA
         script: |
@@ -97,16 +114,9 @@ workflows:
               cd out && zip -qry TelegramZH.ipa Payload
             fi
           fi
-          ls -lah out/
+          ls -lah out/ || true
 
     artifacts:
       - /Users/builder/telegram-build/out/*.ipa
       - /Users/builder/telegram-build/build/artifacts/*.ipa
-
-    publishing:
-      email:
-        recipients:
-          - 992751305-stack@users.noreply.github.com
-        notify:
-          success: true
-          failure: true
+      - /Users/builder/telegram-build/build/**/*.app
