@@ -12,7 +12,7 @@ import os
 import sys
 import shutil
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.environ.get("AUTOZH_ROOT") or os.path.dirname(os.path.abspath(__file__))
 BACKUP_SUFFIX = ".autozh.bak"
 
 # ────────────────────────────────────────────────────────────
