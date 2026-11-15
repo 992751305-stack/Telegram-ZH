@@ -77,13 +77,17 @@ workflows:
           mkdir -p build-system/Make
           cat > build-system/Make/Configuration.json <<EOF
           {
-            "apiId": "${TG_API_ID}",
-            "apiHash": "${TG_API_HASH}",
-            "bundleId": "com.local.telegramzh",
-            "teamId": "",
-            "appCenterAppName": "",
-            "appCenterAppSecret": "",
-            "displayName": "TG-ZH"
+            "bundle_id": "com.local.telegramzh",
+            "api_id": "${TG_API_ID}",
+            "api_hash": "${TG_API_HASH}",
+            "team_id": "",
+            "is_internal_build": "true",
+            "is_appstore_build": "false",
+            "appstore_id": "0",
+            "app_specific_url_scheme": "tg",
+            "premium_iap_product_id": "org.telegram.telegramPremium.monthly",
+            "enable_siri": false,
+            "enable_icloud": false
           }
           EOF
           cat build-system/Make/Configuration.json
