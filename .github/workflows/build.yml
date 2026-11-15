@@ -1,0 +1,129 @@
+# Telegram-iOS + 自动汉化补丁 → 编译出 IPA
+#
+# 前置（在仓库 Settings → Secrets and variables → Actions 里加）：
+#   TG_API_ID     my.telegram.org 申请的 api_id（纯数字）
+#   TG_API_HASH   对应的 api_hash
+#
+# 触发：Actions 页面 → build-telegram-zh → Run workflow
+# 产物：Actions 页面底部 Artifacts → TelegramZH-ipa
+
+name: build-telegram-zh
+
+on:
+  workflow_dispatch:
+    inputs:
+      telegram_ref:
+        description: 'Telegram-iOS 的 commit / tag（留空用 master）'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout patcher repo
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /Applications/Xcode_15*.app 2>/dev/null || true
+          sudo rm -rf ~/Library/Developer/CoreSimulator/Caches 2>/dev/null || true
+          df -h /
+
+      - name: Select Xcode
+        run: |
+          ls /Applications | grep -i xcode || true
+          sudo xcode-select -s /Applications/Xcode_16.0.app 2>/dev/null \
+            || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Clone Telegram-iOS
+        run: |
+          git clone --recursive --depth 1 \
+            ${{ inputs.telegram_ref == '' && '' || format('--branch {0}', inputs.telegram_ref) }} \
+            https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios
+          cd telegram-ios
+          git log -1 --format='%H %ci'
+
+      - name: Apply AutoZH patch
+        run: |
+          cp patch/apply_patch.py telegram-ios/apply_patch.py
+          cd telegram-ios
+          python3 apply_patch.py
+          echo "--- 验证补丁 ---"
+          grep -rn "AutoZH" submodules/TranslateUI/Sources/Translate.swift \
+            submodules/TranslateUI/Sources/ChatTranslation.swift \
+            submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift | head -20
+
+      - name: Configure build
+        run: |
+          cd telegram-ios
+          mkdir -p build-system/Make
+          cat > build-system/Make/Configuration.json <<EOF
+          {
+            "apiId": "${{ secrets.TG_API_ID }}",
+            "apiHash": "${{ secrets.TG_API_HASH }}",
+            "bundleId": "com.local.telegramzh",
+            "teamId": "",
+            "appCenterAppName": "",
+            "appCenterAppSecret": "",
+            "displayName": "TG-ZH"
+          }
+          EOF
+          cat build-system/Make/Configuration.json
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja || true
+          python3 --version
+
+      - name: Build
+        run: |
+          cd telegram-ios
+          python3 build-system/Make/Make.py \
+            --cacheDir="$RUNNER_WORKSPACE/bazel-cache" \
+            build --buildNumber=${{ github.run_number }} \
+            --configuration=release_universal
+
+      - name: Locate artifacts
+        run: |
+          cd telegram-ios
+          echo "--- 搜索产物 ---"
+          find build -maxdepth 4 \( -name '*.ipa' -o -name '*.app' \) 2>/dev/null | head -20
+          ls -la build/artifacts 2>/dev/null || echo "no artifacts dir"
+
+      - name: Package IPA if needed
+        run: |
+          cd telegram-ios
+          mkdir -p out
+          if ls build/artifacts/*.ipa >/dev/null 2>&1; then
+            cp build/artifacts/*.ipa out/
+          else
+            APP=$(find build -maxdepth 5 -name 'Telegram.app' -type d | head -1)
+            echo "APP=$APP"
+            if [ -n "$APP" ]; then
+              mkdir -p out/Payload
+              cp -R "$APP" out/Payload/
+              cd out && zip -qry TelegramZH.ipa Payload
+            fi
+          fi
+          ls -la out/ || true
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TelegramZH-ipa
+          path: telegram-ios/out/*.ipa
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Dump build log on failure
+        if: failure()
+        run: |
+          cd telegram-ios
+          find build -name '*.log' -mmin -60 2>/dev/null | head -5 | while read f; do
+            echo "===== $f ====="
+            tail -100 "$f"
+          done
