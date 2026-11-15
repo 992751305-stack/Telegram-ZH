@@ -1,0 +1,17 @@
+name: env-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "=== disk ==="
+          df -h /
+          echo "=== cpu/mem ==="
+          nproc; free -h
+          echo "=== tools ==="
+          for t in git python3 curl zip unzip cmake ninja clang ld64.lld ldid; do
+            command -v $t || echo "MISSING: $t"
+          done
+          echo "=== network to github ==="
+          curl -sI --max-time 10 https://github.com | head -3
