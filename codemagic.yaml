@@ -12,7 +12,7 @@ workflows:
   telegram-zh:
     name: Telegram ZH (AutoZH patch)
     instance_type: mac_mini_m2          # 免费层可用
-    max_build_duration: 180
+    max_build_duration: 120
     environment:
       xcode: latest
       vars:
