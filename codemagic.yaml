@@ -46,6 +46,30 @@ workflows:
           grep -c "AutoZH" submodules/TranslateUI/Sources/ChatTranslation.swift
           grep -c "AutoZH" submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift
 
+      - name: 修正 Xcode 版本要求
+        script: |
+          set -e
+          cd "$WORKDIR"
+          echo "=== 原 versions.json ==="
+          cat versions.json
+          echo ""
+          echo "=== 探测本机 Xcode ==="
+          xcodebuild -version
+          XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          MACOS_VER=$(sw_vers -productVersion | cut -d. -f1)
+          echo "本机 Xcode=$XCODE_VER macOS=$MACOS_VER"
+          cat > versions.json <<EOF
+          {
+              "app": "13.2",
+              "xcode": "$XCODE_VER",
+              "deploy_xcode": "$XCODE_VER",
+              "bazel": "9.2.0:dd466352a3e4d3581b8898740ee1ff208866ccbe25f8d367c5dcb950219587e6",
+              "macos": "$MACOS_VER"
+          }
+          EOF
+          echo "=== 修改后 versions.json ==="
+          cat versions.json
+
       - name: 写入构建配置
         script: |
           set -e
@@ -64,29 +88,20 @@ workflows:
           EOF
           cat build-system/Make/Configuration.json
 
-      - name: 生成签名证书与描述文件（自签名，用于 Sideloadly 重签前的占位）
-        script: |
-          set -e
-          cd "$WORKDIR"
-          echo "--- 查看 Make.py 支持的签名参数 ---"
-          python3 build-system/Make/Make.py build --help 2>&1 | head -60
-
       - name: 编译
         script: |
           set -e
           cd "$WORKDIR"
+          echo "=== 签名相关可用参数 ==="
+          python3 build-system/Make/Make.py build --help 2>&1 | head -50 || true
+          echo ""
+          echo "=== 开始编译 ==="
           python3 build-system/Make/Make.py \
             --cacheDir="$WORKDIR/.bazel-cache" \
             build --buildNumber=$BUILD_NUMBER \
             --configurationPath=build-system/Make/Configuration.json \
             --configuration=release_arm64 \
-            --xcodeManagedCodesigning 2>&1 || \
-          python3 build-system/Make/Make.py \
-            --cacheDir="$WORKDIR/.bazel-cache" \
-            build --buildNumber=$BUILD_NUMBER \
-            --configurationPath=build-system/Make/Configuration.json \
-            --configuration=release_arm64 \
-            --codesigningInformationPath=/dev/null 2>&1 || true
+            --xcodeManagedCodesigning
 
       - name: 定位产物
         script: |
