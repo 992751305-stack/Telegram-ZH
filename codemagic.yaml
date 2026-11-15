@@ -41,11 +41,14 @@ workflows:
           set -e
           SRC="$(pwd)/patch/apply_patch.py"
           echo "补丁来源: $SRC"
+          echo "WORKDIR: $WORKDIR"
           ls -la "$SRC"
-          cp "$SRC" "$WORKDIR/apply_patch.py"
           cd "$WORKDIR"
+          echo "--- 确认工作目录 ---"
+          pwd
           ls -d submodules
-          python3 "$WORKDIR/apply_patch.py"
+          echo "--- 执行补丁 (AUTOZH_ROOT=$WORKDIR) ---"
+          AUTOZH_ROOT="$WORKDIR" python3 "$SRC"
           echo "--- 补丁验证 ---"
           grep -c "AutoZH" submodules/TranslateUI/Sources/Translate.swift
           grep -c "AutoZH" submodules/TranslateUI/Sources/ChatTranslation.swift
