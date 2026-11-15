@@ -1,0 +1,107 @@
+# codemagic.yaml —— 免费 macOS 构建 Telegram-iOS + 自动汉化补丁
+#
+# 用法：
+#   1. codemagic.io 用 GitHub 登录
+#   2. Add application → 选 992751305-stack/Telegram-ZH
+#   3. 它会自动读这个文件 → Start new build
+#
+# 免费额度：500 分钟/月（macOS 按 2x 计费，实际约 250 分钟）
+# 一次 Telegram 全量编译 60–120 分钟，够跑 2–4 次。
+
+workflows:
+  telegram-zh:
+    name: Telegram ZH (AutoZH patch)
+    instance_type: mac_mini_m2          # 免费层可用
+    max_build_duration: 180
+    environment:
+      xcode: latest
+      vars:
+        TELEGRAM_REPO: "https://github.com/TelegramMessenger/Telegram-iOS.git"
+
+    triggering:
+      events:
+        - workflow_dispatch
+
+    scripts:
+      - name: 环境自检
+        script: |
+          sw_vers
+          xcodebuild -version
+          python3 --version
+          df -h /
+          echo "可用空间检查完成"
+
+      - name: 克隆 Telegram-iOS
+        script: |
+          set -e
+          git clone --recursive --depth 1 "$TELEGRAM_REPO" telegram-ios
+          cd telegram-ios
+          git log -1 --format='%H %ci'
+
+      - name: 应用自动汉化补丁
+        script: |
+          set -e
+          cp patch/apply_patch.py telegram-ios/apply_patch.py
+          cd telegram-ios
+          python3 apply_patch.py
+          echo "--- 补丁验证 ---"
+          grep -c "AutoZH" submodules/TranslateUI/Sources/Translate.swift
+          grep -c "AutoZH" submodules/TranslateUI/Sources/ChatTranslation.swift
+          grep -c "AutoZH" submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift
+
+      - name: 写入构建配置
+        script: |
+          set -e
+          cd telegram-ios
+          mkdir -p build-system/Make
+          cat > build-system/Make/Configuration.json <<EOF
+          {
+            "apiId": "${TG_API_ID}",
+            "apiHash": "${TG_API_HASH}",
+            "bundleId": "com.local.telegramzh",
+            "teamId": "",
+            "appCenterAppName": "",
+            "appCenterAppSecret": "",
+            "displayName": "TG-ZH"
+          }
+          EOF
+          cat build-system/Make/Configuration.json
+
+      - name: 编译
+        script: |
+          set -e
+          cd telegram-ios
+          python3 build-system/Make/Make.py \
+            --cacheDir="$CM_BUILD_DIR/bazel-cache" \
+            build --buildNumber=$BUILD_NUMBER \
+            --configuration=release_universal
+
+      - name: 打包 IPA
+        script: |
+          set -e
+          cd telegram-ios
+          mkdir -p out
+          if ls build/artifacts/*.ipa >/dev/null 2>&1; then
+            cp build/artifacts/*.ipa out/
+          else
+            APP=$(find build -maxdepth 6 -name '*.app' -type d | grep -v Framework | head -1)
+            echo "APP=$APP"
+            if [ -n "$APP" ]; then
+              mkdir -p out/Payload
+              cp -R "$APP" out/Payload/
+              cd out && zip -qry TelegramZH.ipa Payload
+            fi
+          fi
+          ls -lah out/
+
+    artifacts:
+      - telegram-ios/out/*.ipa
+      - telegram-ios/build/artifacts/*.ipa
+
+    publishing:
+      email:
+        recipients:
+          - 992751305-stack@users.noreply.github.com
+        notify:
+          success: true
+          failure: true

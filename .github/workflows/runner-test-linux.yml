@@ -1,9 +1,0 @@
-name: runner-test-linux
-on: workflow_dispatch
-jobs:
-  hello:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          uname -a
-          echo "linux runner ok"
