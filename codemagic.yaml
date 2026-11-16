@@ -113,24 +113,33 @@ workflows:
             --configurationPath="build-system/appstore-configuration.json" \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
-            --buildNumber=$BUILD_NUMBER
+            --buildNumber=$BUILD_NUMBER \
+            --outputBuildArtifactsPath="$WORKDIR/build/artifacts"
 
-      - name: 收集 IPA 与 DSYM（官方 glob）
+      - name: 收集 IPA 与 DSYM（Make.py 原生产物 + 兜底 find）
         script: |
           set -e
           cd "$WORKDIR"
-          OUTPUT_PATH="build/artifacts"
-          rm -rf "$OUTPUT_PATH"
-          mkdir -p "$OUTPUT_PATH"
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
-            cp "$f" "$OUTPUT_PATH/"
-          done
-          mkdir -p build/DSYMs
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/*.dSYM; do
-            cp -R "$f" build/DSYMs/ 2>/dev/null || true
-          done
-          zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null || true
-          ls -lah "$OUTPUT_PATH/"
+          mkdir -p build/artifacts
+          if [ -f build/artifacts/Telegram.ipa ]; then
+            echo "Make.py 已输出 IPA"
+          else
+            echo "--- 官方产物路径未找到，用 find 兜底 ---"
+            IPA=$(find bazel-out bazel-bin -name 'Telegram.ipa' -type f 2>/dev/null | head -1)
+            echo "IPA at: $IPA"
+            if [ -n "$IPA" ]; then
+              cp "$IPA" build/artifacts/Telegram.ipa
+            fi
+          fi
+          if [ ! -f build/artifacts/Telegram.DSYMs.zip ] && [ -f build/artifacts/Telegram.ipa ]; then
+            mkdir -p build/DSYMs
+            find bazel-out bazel-bin -name '*.dSYM' -maxdepth 6 -type d 2>/dev/null | head -20 | while read f; do
+              cp -R "$f" build/DSYMs/ 2>/dev/null || true
+            done
+            cd build/artifacts && zip -qry Telegram.DSYMs.zip ../DSYMs 2>/dev/null || true
+            cd "$WORKDIR"
+          fi
+          ls -lah build/artifacts/
 
     artifacts:
       - /Users/Shared/telegram-ios/build/artifacts/*.ipa
