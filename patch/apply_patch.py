@@ -184,12 +184,43 @@ PATCH_4B_NEW = """    |> `catch` { error -> Signal<(String, [MessageTextEntity])
         return _autoZh_localTranslate(text: text, fromLang: nil, toLang: toLang)
     }"""
 
+# ────────────────────────────────────────────────────────────
+# 补丁 5：强制启用 Apple 系统翻译通道（iOS 18+，免费无配额）
+#   ChatTranslation.translateMessageIds 里 enableLocalIfPossible
+#   受服务器配置 translationConfiguration.auto == .system 限制。
+#   强制 true 后，普通文本消息优先走 Apple 系统翻译
+#   （engineExperimentalInternalTranslationService，打开聊天时注册），
+#   不经过 Telegram 服务器 → 无每日配额。
+# ────────────────────────────────────────────────────────────
+PATCH_5_FILE = "submodules/TranslateUI/Sources/ChatTranslation.swift"
+
+PATCH_5_OLD = """        let translationConfiguration = TranslationConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 })
+        var enableLocalIfPossible = false
+        switch translationConfiguration.auto {
+        case .system:
+            if #available(iOS 18.0, *) {
+                enableLocalIfPossible = true
+            }
+        default:
+            break
+        }"""
+
+PATCH_5_NEW = """        // [AutoZH] 强制启用 Apple 系统翻译通道（iOS 18+ 设备上免费、无配额）。
+        // 原逻辑要求服务器下发 .system 配置才开启，导致该通道几乎不可用。
+        let translationConfiguration = TranslationConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 })
+        var enableLocalIfPossible = false
+        if #available(iOS 18.0, *) {
+            enableLocalIfPossible = true
+        }
+        let _ = translationConfiguration"""
+
 PATCHES = [
     (PATCH_1_FILE, PATCH_1_OLD, PATCH_1_NEW, "canTranslateChats 强制放行"),
     (PATCH_2_FILE, PATCH_2_OLD, PATCH_2_NEW, "isEnabled 本地强制 true"),
     (PATCH_3_FILE, PATCH_3_OLD, PATCH_3_NEW, "translateToLanguage 兜底"),
     (PATCH_4_FILE, PATCH_4_OLD, PATCH_4_NEW, "注入本地直连翻译函数"),
     (PATCH_4_FILE, PATCH_4B_OLD, PATCH_4B_NEW, "配额耗尽时降级到本地翻译"),
+    (PATCH_5_FILE, PATCH_5_OLD, PATCH_5_NEW, "强制启用 Apple 系统翻译通道"),
 ]
 
 
