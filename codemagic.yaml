@@ -86,6 +86,23 @@ workflows:
           /usr/local/bin/ccache --version | head -1
           /usr/local/bin/sysctl -n hw.ncpu
 
+      - name: 补齐 dav1d/libvpx 构建依赖（meson / ninja / yasm）
+        script: |
+          set -e
+          for t in meson ninja yasm; do
+            if command -v "$t" >/dev/null 2>&1; then
+              echo "$t 已存在: $(command -v $t)"
+            else
+              echo "安装 $t ..."
+              brew install "$t" || echo "$t 安装失败（若构建不依赖则无碍）"
+            fi
+          done
+          # 全部软链到硬编码 PATH，防 genrule PATH 截断
+          for t in meson ninja yasm; do
+            P=$(command -v "$t" || ls /opt/homebrew/bin/$t /usr/local/bin/$t 2>/dev/null | head -1)
+            [ -n "$P" ] && sudo ln -sf "$P" /usr/local/bin/$t && echo "linked $t -> /usr/local/bin/$t"
+          done
+
       - name: 编译（命令与官方 CI 逐字一致）
         script: |
           set -e
