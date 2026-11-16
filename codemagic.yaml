@@ -74,6 +74,18 @@ workflows:
           xcrun -f metal || true
           /usr/bin/xcrun metal --version || echo "metal 仍不可用（若失败需检查 runner）"
 
+      - name: 补齐 tdlib 构建依赖（ccache / sysctl 进硬编码 PATH）
+        script: |
+          set -e
+          # td genrule 的 PATH 硬编码为 /bin:/usr/bin:/usr/local/bin
+          brew list ccache >/dev/null 2>&1 || brew install ccache
+          CCACHE_BIN=$(ls /opt/homebrew/bin/ccache /usr/local/bin/ccache 2>/dev/null | head -1)
+          echo "ccache found at: $CCACHE_BIN"
+          sudo ln -sf "$CCACHE_BIN" /usr/local/bin/ccache
+          sudo ln -sf /usr/sbin/sysctl /usr/local/bin/sysctl
+          /usr/local/bin/ccache --version | head -1
+          /usr/local/bin/sysctl -n hw.ncpu
+
       - name: 编译（命令与官方 CI 逐字一致）
         script: |
           set -e
