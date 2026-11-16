@@ -178,10 +178,19 @@ PATCH_4B_OLD = """    |> mapError { error -> TranslationError in
         }
     }"""
 
-PATCH_4B_NEW = """    |> `catch` { error -> Signal<(String, [MessageTextEntity])?, TranslationError> in
+PATCH_4B_NEW = """    |> `catch` { error -> Signal<Api.messages.TranslatedText, TranslationError> in
         // [AutoZH] 配额耗尽 / 服务端禁用 / 通用失败 → 全部落到本地直连翻译，
-        // 不消耗 Telegram 每日翻译配额。
+        // 不消耗 Telegram 每日翻译配额。Google 结果包装回 Api.messages.TranslatedText
+        // 以匹配后续 mapToSignal 的输入类型。
         return _autoZh_localTranslate(text: text, fromLang: nil, toLang: toLang)
+        |> mapToSignal { translated -> Signal<Api.messages.TranslatedText, TranslationError> in
+            switch translated {
+            case let .some((translatedText, translatedEntities)):
+                return .single(.translateResult(.init(result: [.textWithEntities(.init(text: translatedText, entities: apiEntitiesFromMessageTextEntities(translatedEntities, associatedPeers: SimpleDictionary())))])))
+            case .none:
+                return .single(.translateResult(.init(result: [.textWithEntities(.init(text: "", entities: []))])))
+            }
+        }
     }"""
 
 # ────────────────────────────────────────────────────────────

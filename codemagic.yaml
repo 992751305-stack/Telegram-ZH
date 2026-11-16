@@ -1,3 +1,15 @@
+# codemagic.yaml —— Telegram-iOS 13.0.0 + 自动汉化补丁（对齐官方 CI 的无账号编译流程）
+#
+# 依据：官方 .github/workflows/build.yml（release-13.0.0 tag 自带），
+# 官方 CI 在无证书 runner 上用 fake-codesigning 出 unsigned IPA。
+# 本配置 = 官方流程 + AutoZH 补丁 + Codemagic runner。
+#
+# 环境匹配验证：release-13.0.0 官方要求 Xcode 26.6 / macOS 26，
+# Codemagic mac_mini_m2 (xcode latest = 26.6) 原生一致，无需版本覆盖。
+# 6 个补丁锚点已在 release-13.0.0 上逐一验证 MATCH。
+#
+# 产物：unsigned Telegram.ipa → Sideloadly 用免费 Apple ID 重签安装。
+
 workflows:
   telegram-zh:
     name: Telegram ZH (AutoZH patch)
@@ -6,8 +18,8 @@ workflows:
     environment:
       xcode: latest
       vars:
-        TELEGRAM_REPO: "https://github.com/TelegramMessenger/Telegram-iOS.git"
-        WORKDIR: "/Users/builder/telegram-build"
+        TELEGRAM_REF: "release-13.0.0"
+        WORKDIR: "/Users/Shared/telegram-ios"
 
     scripts:
       - name: 环境自检
@@ -17,127 +29,73 @@ workflows:
           xcodebuild -version
           python3 --version
           df -h /
-          echo "PWD=$(pwd)"
-          echo "CM_BUILD_DIR=$CM_BUILD_DIR"
+          echo "WORKDIR=$WORKDIR"
 
-      - name: 克隆 Telegram-iOS
+      - name: 克隆 Telegram-iOS (release-13.0.0)
         script: |
           set -e
-          rm -rf "$WORKDIR"
-          git clone --recursive --depth 1 "$TELEGRAM_REPO" "$WORKDIR"
+          sudo rm -rf "$WORKDIR"
+          git clone --recursive --depth 1 --branch "$TELEGRAM_REF" \
+            https://github.com/TelegramMessenger/Telegram-iOS.git "$WORKDIR"
           cd "$WORKDIR"
           git log -1 --format='%H %ci'
-          echo "--- submodules 检查 ---"
-          ls -d submodules/TelegramUI submodules/TranslateUI submodules/TelegramCore
+          echo "--- 关键子模块存在性 ---"
+          ls -d submodules/TelegramUI submodules/TranslateUI submodules/TelegramCore build-system/fake-codesigning
 
-      - name: 应用自动汉化补丁
+      - name: 应用自动汉化补丁（6 处）
         script: |
           set -e
-          SRC="$(pwd)/patch/apply_patch.py"
-          echo "补丁来源: $SRC"
-          echo "WORKDIR: $WORKDIR"
           cd "$WORKDIR"
-          pwd
-          ls -d submodules
-          echo "--- 执行补丁 (AUTOZH_ROOT=$WORKDIR) ---"
-          AUTOZH_ROOT="$WORKDIR" python3 "$SRC"
-          echo "--- 补丁验证 ---"
+          AUTOZH_ROOT="$WORKDIR" python3 "$CM_BUILD_DIR/patch/apply_patch.py"
+          echo "--- 补丁验证（应各输出 >=1） ---"
           grep -c "AutoZH" submodules/TranslateUI/Sources/Translate.swift
           grep -c "AutoZH" submodules/TranslateUI/Sources/ChatTranslation.swift
           grep -c "AutoZH" submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift
+          grep -c "AutoZH" submodules/TelegramCore/Sources/TelegramEngine/Messages/Translate.swift
 
-      - name: 修正 Xcode 版本要求
+      - name: 导入自签名证书（官方无账号编译流程）
         script: |
           set -e
           cd "$WORKDIR"
-          echo "=== 原 versions.json ==="
-          cat versions.json
-          echo ""
-          echo "=== 探测本机 Xcode ==="
-          xcodebuild -version
-          XCODE_VER=$(xcodebuild -version | head -1 | awk '{print $2}')
-          MACOS_VER=$(sw_vers -productVersion | cut -d. -f1)
-          echo "本机 Xcode=$XCODE_VER macOS=$MACOS_VER"
-          cat > versions.json <<EOF
-          {
-              "app": "13.2",
-              "xcode": "$XCODE_VER",
-              "deploy_xcode": "$XCODE_VER",
-              "bazel": "9.2.0:dd466352a3e4d3581b8898740ee1ff208866ccbe25f8d367c5dcb950219587e6",
-              "macos": "$MACOS_VER"
-          }
-          EOF
-          echo "=== 修改后 versions.json ==="
-          cat versions.json
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
 
-      - name: 写入构建配置
+      - name: 编译（命令与官方 CI 逐字一致）
         script: |
           set -e
           cd "$WORKDIR"
-          mkdir -p build-system/Make
-          cat > build-system/Make/Configuration.json <<EOF
-          {
-            "bundle_id": "com.local.telegramzh",
-            "api_id": "${TG_API_ID}",
-            "api_hash": "${TG_API_HASH}",
-            "team_id": "",
-            "is_internal_build": "true",
-            "is_appstore_build": "false",
-            "appstore_id": "0",
-            "app_specific_url_scheme": "tg",
-            "premium_iap_product_id": "org.telegram.telegramPremium.monthly",
-            "enable_siri": false,
-            "enable_icloud": false
-          }
-          EOF
-          cat build-system/Make/Configuration.json
-
-      - name: 编译
-        script: |
-          set -e
-          cd "$WORKDIR"
-          echo "=== 准备空签名目录（无开发者账号，编译后由 Sideloadly 重签）==="
-          mkdir -p "$WORKDIR/codesign-info/profiles" "$WORKDIR/codesign-info/certs"
-          ls -la "$WORKDIR/codesign-info"
-          echo ""
-          echo "=== 开始编译（禁用 provisioning profiles）==="
-          python3 build-system/Make/Make.py \
-            --cacheDir="$WORKDIR/.bazel-cache" \
-            build --buildNumber=$BUILD_NUMBER \
-            --configurationPath=build-system/Make/Configuration.json \
+          python3 -u build-system/Make/Make.py \
+            --bazelUserRoot="/private/var/tmp/_bazel_containerhost" \
+            build \
+            --configurationPath="build-system/appstore-configuration.json" \
+            --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
-            --disableProvisioningProfiles \
-            --codesigningInformationPath="$WORKDIR/codesign-info"
+            --buildNumber=$BUILD_NUMBER
 
-      - name: 定位产物
+      - name: 收集 IPA 与 DSYM（官方 glob）
         script: |
           set -e
           cd "$WORKDIR"
-          echo "--- 搜索 .app / .ipa ---"
-          find build -maxdepth 6 \( -name '*.app' -o -name '*.ipa' \) 2>/dev/null | head -20
-          ls -la build/artifacts 2>/dev/null || echo "no artifacts dir"
-          echo "--- build 目录结构 ---"
-          find build -maxdepth 3 -type d 2>/dev/null | head -30
-
-      - name: 打包 IPA
-        script: |
-          set -e
-          cd "$WORKDIR"
-          mkdir -p out
-          if ls build/artifacts/*.ipa >/dev/null 2>&1; then
-            cp build/artifacts/*.ipa out/
-          else
-            APP=$(find build -maxdepth 6 -name '*.app' -type d | grep -v Framework | head -1)
-            echo "APP=$APP"
-            if [ -n "$APP" ]; then
-              mkdir -p out/Payload
-              cp -R "$APP" out/Payload/
-              cd out && zip -qry TelegramZH.ipa Payload
-            fi
-          fi
-          ls -lah out/ || true
+          OUTPUT_PATH="build/artifacts"
+          rm -rf "$OUTPUT_PATH"
+          mkdir -p "$OUTPUT_PATH"
+          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
+            cp "$f" "$OUTPUT_PATH/"
+          done
+          mkdir -p build/DSYMs
+          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/*.dSYM; do
+            cp -R "$f" build/DSYMs/ 2>/dev/null || true
+          done
+          zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null || true
+          ls -lah "$OUTPUT_PATH/"
 
     artifacts:
-      - /Users/builder/telegram-build/out/*.ipa
-      - /Users/builder/telegram-build/build/artifacts/*.ipa
-      - /Users/builder/telegram-build/build/**/*.app
+      - /Users/Shared/telegram-ios/build/artifacts/*.ipa
+      - /Users/Shared/telegram-ios/build/artifacts/*.zip
+
+    publishing:
+      email:
+        recipients:
+          - 992751305-stack@users.noreply.github.com
+        notify:
+          success: true
+          failure: true
