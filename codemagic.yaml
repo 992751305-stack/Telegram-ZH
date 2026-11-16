@@ -59,6 +59,12 @@ workflows:
           cd "$WORKDIR"
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
 
+      - name: 续期并重签 fake profiles（修复 ExpirationDate 过期）
+        script: |
+          set -e
+          cd "$WORKDIR"
+          python3 "$CM_BUILD_DIR/patch/fix_profiles.py" build-system/fake-codesigning temp.keychain
+
       - name: 安装 Metal Toolchain（Xcode 26 必需）
         script: |
           set -e
