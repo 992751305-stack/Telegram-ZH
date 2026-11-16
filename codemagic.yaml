@@ -96,16 +96,18 @@ workflows:
         script: |
           set -e
           cd "$WORKDIR"
-          echo "=== 签名相关可用参数 ==="
-          python3 build-system/Make/Make.py build --help 2>&1 | head -50 || true
+          echo "=== 准备空签名目录（无开发者账号，编译后由 Sideloadly 重签）==="
+          mkdir -p "$WORKDIR/codesign-info/profiles" "$WORKDIR/codesign-info/certs"
+          ls -la "$WORKDIR/codesign-info"
           echo ""
-          echo "=== 开始编译 ==="
+          echo "=== 开始编译（禁用 provisioning profiles）==="
           python3 build-system/Make/Make.py \
             --cacheDir="$WORKDIR/.bazel-cache" \
             build --buildNumber=$BUILD_NUMBER \
             --configurationPath=build-system/Make/Configuration.json \
             --configuration=release_arm64 \
-            --xcodeManagedCodesigning
+            --disableProvisioningProfiles \
+            --codesigningInformationPath="$WORKDIR/codesign-info"
 
       - name: 定位产物
         script: |
