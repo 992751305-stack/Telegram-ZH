@@ -59,6 +59,15 @@ workflows:
           cd "$WORKDIR"
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
 
+      - name: 安装 Metal Toolchain（Xcode 26 必需）
+        script: |
+          set -e
+          echo "--- 检查 Metal Toolchain 是否已装 ---"
+          xcodebuild -downloadComponent MetalToolchain 2>&1 | tail -5 || true
+          echo "--- 验证 metal 编译器 ---"
+          xcrun -f metal || true
+          /usr/bin/xcrun metal --version || echo "metal 仍不可用（若失败需检查 runner）"
+
       - name: 编译（命令与官方 CI 逐字一致）
         script: |
           set -e
